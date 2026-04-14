@@ -38,8 +38,6 @@ app.post("/todo", (req, res) => {
   res.status(201).json(newTodo);
 });
 
-// insert many
-
 // update one
 app.patch("/todo/:id", (req, res) => {
   const updatedTodo = {
@@ -50,14 +48,10 @@ app.patch("/todo/:id", (req, res) => {
   res.status(200).json(updatedTodo);
 });
 
-// update many
-
 // delete one
 app.delete("/todo/:id", (req, res) => {
   res.sendStatus(204);
 });
-
-// delete many
 
 app.listen(port, () => {
   console.log(`Example app listening on port ${port}`);
