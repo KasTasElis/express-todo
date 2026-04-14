@@ -3,6 +3,7 @@ import express from "express";
 import type { Request, Response, NextFunction } from "express";
 import { connectDB, db } from "./db.js";
 import { z } from "zod";
+import morgan from "morgan";
 
 const CreateTodoSchema = z.object({
   title: z.string().min(3),
@@ -12,6 +13,8 @@ const app = express();
 const port = 3000;
 
 app.use(express.json());
+
+app.use(morgan("dev"));
 
 // a bit of protection against invalid JSON
 function errorHandler(
