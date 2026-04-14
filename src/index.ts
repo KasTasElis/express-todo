@@ -1,8 +1,35 @@
+import "dotenv/config";
 import express from "express";
+import type { Request, Response, NextFunction } from "express";
+import { connectDB, db } from "./db.js";
+import { z } from "zod";
+
+const CreateTodoSchema = z.object({
+  title: z.string().min(3),
+});
+
 const app = express();
 const port = 3000;
 
 app.use(express.json());
+
+// a bit of protection against invalid JSON
+function errorHandler(
+  err: unknown,
+  _req: Request,
+  res: Response,
+  _next: NextFunction,
+) {
+  if (err instanceof SyntaxError && "body" in err) {
+    res.status(400).json({ error: "Invalid JSON" });
+    return;
+  }
+  res.status(500).json({ error: "Internal server error" });
+}
+
+app.use(errorHandler);
+
+await connectDB();
 
 // hello world
 app.get("/", (req, res) => {
@@ -29,13 +56,27 @@ app.get("/todo", (req, res) => {
 });
 
 // insert one
-app.post("/todo", (req, res) => {
-  const newTodo = {
-    id: req.body.id,
-    title: req.body.title,
-  };
+app.post("/todo", async (req, res) => {
+  try {
+    const parsed = CreateTodoSchema.safeParse(req.body);
 
-  res.status(201).json(newTodo);
+    if (parsed.error) {
+      res.status(400).json({ errors: parsed.error.issues });
+      return;
+    }
+
+    const newTodo = {
+      title: parsed.data.title,
+      completed: false,
+    };
+
+    const result = await db.collection("todos").insertOne(newTodo);
+
+    res.status(201).json({ ...newTodo, _id: result.insertedId });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Failed to create todo" });
+  }
 });
 
 // update one
