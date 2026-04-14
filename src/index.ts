@@ -112,8 +112,27 @@ app.patch("/todo/:id", (req, res) => {
 });
 
 // delete one
-app.delete("/todo/:id", (req, res) => {
-  res.sendStatus(204);
+app.delete("/todo/:id", async (req, res) => {
+  const parsed = TodoIdSchema.safeParse(req.params.id);
+
+  if (!parsed.success) {
+    return res.status(400).json({ errors: parsed.error.issues });
+  }
+
+  const _id = new ObjectId(parsed.data);
+
+  try {
+    const result = await db.collection("todos").deleteOne({ _id });
+
+    if (result.deletedCount === 0) {
+      return res.sendStatus(404);
+    }
+
+    return res.sendStatus(204);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ error: "Failed to delete todo." });
+  }
 });
 
 app.use(errorHandler);
