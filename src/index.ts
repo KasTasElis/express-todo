@@ -4,6 +4,11 @@ import type { Request, Response, NextFunction } from "express";
 import { connectDB, db } from "./db.js";
 import { z } from "zod";
 import morgan from "morgan";
+import { ObjectId } from "mongodb";
+
+const TodoIdSchema = z.string().refine((val) => ObjectId.isValid(val), {
+  error: "You passed an Invalid ID.",
+});
 
 const CreateTodoSchema = z.object({
   title: z.string().min(3),
@@ -30,8 +35,6 @@ function errorHandler(
   res.status(500).json({ error: "Internal server error" });
 }
 
-app.use(errorHandler);
-
 await connectDB();
 
 // hello world
@@ -40,9 +43,25 @@ app.get("/", (req, res) => {
 });
 
 // get one
-app.get("/todo/:id", (req, res) => {
-  const todo = { id: req.params.id, title: "hello world" };
-  res.status(200).json(todo);
+app.get("/todo/:id", async (req, res) => {
+  const parsed = TodoIdSchema.safeParse(req.params.id);
+
+  if (!parsed.success) {
+    return res.status(400).json({ errors: parsed.error.issues });
+  }
+
+  const _id = new ObjectId(req.params.id);
+
+  try {
+    const result = await db.collection("todos").findOne({ _id });
+    if (result === null) {
+      return res.sendStatus(404);
+    }
+    return res.status(200).json(result);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ error: "Server error." });
+  }
 });
 
 // get many
@@ -63,7 +82,7 @@ app.post("/todo", async (req, res) => {
   try {
     const parsed = CreateTodoSchema.safeParse(req.body);
 
-    if (parsed.error) {
+    if (!parsed.success) {
       res.status(400).json({ errors: parsed.error.issues });
       return;
     }
@@ -96,6 +115,8 @@ app.patch("/todo/:id", (req, res) => {
 app.delete("/todo/:id", (req, res) => {
   res.sendStatus(204);
 });
+
+app.use(errorHandler);
 
 app.listen(port, () => {
   console.log(`Example app listening on port ${port}`);
