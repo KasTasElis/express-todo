@@ -6,3 +6,4 @@
 - [ ] Add Zod validation
 - [ ] Implement query param filtering example
 - [ ] Add pagination
+- [ ] Refactor with Mongoose (models, schemas)
