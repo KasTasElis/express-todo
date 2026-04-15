@@ -4,7 +4,14 @@ import type { Request, Response, NextFunction } from "express";
 import { connectDB, db } from "./db.js";
 import { z } from "zod";
 import morgan from "morgan";
-import { ObjectId } from "mongodb";
+import { ObjectId, type Document, type Filter } from "mongodb";
+
+const TodoSchema = z.object({
+  title: z.string(),
+  completed: z.boolean(),
+});
+
+type Todo = z.infer<typeof TodoSchema> & { _id?: ObjectId };
 
 const TodoIdSchema = z
   .string()
@@ -25,7 +32,12 @@ const UpdateTodoSchema = z.object({
 const GetTodosSchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(10),
+  completed: z.coerce.boolean().optional(),
+  search: z.string().optional(),
 });
+
+const getCollection = <T extends Document>(name: string) =>
+  db.collection<T>(name);
 
 const app = express();
 const port = 3000;
@@ -50,6 +62,8 @@ function errorHandler(
 
 await connectDB();
 
+const todos = getCollection<Todo>("todos");
+
 // hello world
 app.get("/", (req, res) => {
   res.send("Hello Eli!");
@@ -60,11 +74,11 @@ app.get("/todo/:id", async (req, res) => {
   const parsed = TodoIdSchema.safeParse(req.params.id);
 
   if (!parsed.success) {
-    return res.status(400).json({ errors: parsed.error.issues });
+    return res.status(400).json({ error: parsed.error.issues });
   }
 
   try {
-    const result = await db.collection("todos").findOne({ _id: parsed.data });
+    const result = await todos.findOne({ _id: parsed.data });
     if (result === null) {
       return res.sendStatus(404);
     }
@@ -83,10 +97,19 @@ app.get("/todo", async (req, res) => {
     return res.status(400).json({ error: "Invalid query parameters." });
   }
 
+  const filter: Filter<Todo> = {} as Filter<Todo>;
+
+  if (parsed.data.completed !== undefined) {
+    filter.completed = parsed.data.completed;
+  }
+
+  if (parsed.data.search) {
+    filter.title = { $regex: parsed.data.search, $options: "i" };
+  }
+
   try {
-    const response = await db
-      .collection("todos")
-      .find()
+    const response = await todos
+      .find(filter)
       .skip((parsed.data.page - 1) * parsed.data.limit)
       .limit(parsed.data.limit)
       .toArray();
@@ -104,7 +127,7 @@ app.post("/todo", async (req, res) => {
     const parsed = CreateTodoSchema.safeParse(req.body);
 
     if (!parsed.success) {
-      res.status(400).json({ errors: parsed.error.issues });
+      res.status(400).json({ error: parsed.error.issues });
       return;
     }
 
@@ -113,7 +136,7 @@ app.post("/todo", async (req, res) => {
       completed: false,
     };
 
-    const result = await db.collection("todos").insertOne(newTodo);
+    const result = await todos.insertOne(newTodo);
 
     res.status(201).json({ ...newTodo, _id: result.insertedId });
   } catch (error) {
@@ -138,13 +161,11 @@ app.patch("/todo/:id", async (req, res) => {
   const newTodo = parsedBody.data;
 
   try {
-    const response = await db
-      .collection("todos")
-      .findOneAndUpdate(
-        { _id: parsedParams.data },
-        { $set: newTodo },
-        { returnDocument: "after" },
-      );
+    const response = await todos.findOneAndUpdate(
+      { _id: parsedParams.data },
+      { $set: newTodo as Partial<Todo> },
+      { returnDocument: "after" },
+    );
 
     if (response === null) {
       return res.sendStatus(404);
@@ -162,11 +183,11 @@ app.delete("/todo/:id", async (req, res) => {
   const parsed = TodoIdSchema.safeParse(req.params.id);
 
   if (!parsed.success) {
-    return res.status(400).json({ errors: parsed.error.issues });
+    return res.status(400).json({ error: parsed.error.issues });
   }
 
   try {
-    const result = await db.collection("todos").deleteOne({ _id: parsed.data });
+    const result = await todos.deleteOne({ _id: parsed.data });
 
     if (result.deletedCount === 0) {
       return res.sendStatus(404);

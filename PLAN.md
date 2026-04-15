@@ -2,9 +2,9 @@
 
 ## Next Steps
 
-- [ ] Wire up MongoDB
-- [ ] Add Zod validation
-- [ ] Implement query param filtering example
-- [ ] Add pagination
+- [x] Wire up MongoDB
+- [x] Add Zod validation
+- [x] Implement query param filtering example
+- [x] Add pagination
 - [ ] Refactor with Mongoose (models, schemas)
 - [ ] Implement auth?
