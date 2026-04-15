@@ -6,5 +6,5 @@
 - [x] Add Zod validation
 - [x] Implement query param filtering example
 - [x] Add pagination
-- [ ] Refactor with Mongoose (models, schemas)
+- [x] Refactor with Mongoose (models, schemas)
 - [ ] Implement auth?
