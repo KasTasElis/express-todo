@@ -128,7 +128,9 @@ app.patch("/todo/:id", async (req, res) => {
   const id = ZMongoIdSchema.parse(req.params.id);
   const body = ZUpdateTodoSchema.parse(req.body);
 
-  const todo = await Todo.findByIdAndUpdate(id, body, { new: true });
+  const todo = await Todo.findByIdAndUpdate(id, body, {
+    returnDocument: "after",
+  });
 
   if (todo === null) {
     return res.sendStatus(404);
