@@ -1,207 +1,158 @@
 import "dotenv/config";
-import express from "express";
-import type { Request, Response, NextFunction } from "express";
-import { connectDB, db } from "./db.js";
-import { z } from "zod";
+import mongoose from "mongoose";
+import express, {
+  type NextFunction,
+  type Response,
+  type Request,
+} from "express";
 import morgan from "morgan";
-import { ObjectId, type Document, type Filter } from "mongodb";
+import z, { ZodError } from "zod";
+import { ObjectId } from "mongodb";
 
-const TodoSchema = z.object({
-  title: z.string(),
-  completed: z.boolean(),
+const app = express();
+const port = 3000;
+app.use(express.json());
+app.use(morgan("dev"));
+
+const { Schema, model } = mongoose;
+
+await mongoose.connect(process.env.MONGODB_URI!, { dbName: "todo" });
+
+const ZMongoIdSchema = z.string().refine((val) => ObjectId.isValid(val), {
+  error: "Invalid Object ID.",
 });
 
-type Todo = z.infer<typeof TodoSchema> & { _id?: ObjectId };
-
-const TodoIdSchema = z
-  .string()
-  .refine((val) => ObjectId.isValid(val), {
-    error: "You passed an Invalid ID.",
-  })
-  .transform((val) => new ObjectId(val));
-
-const CreateTodoSchema = z.object({
+const ZCreateTodoSchema = z.object({
   title: z.string().min(3),
 });
 
-const UpdateTodoSchema = z.object({
+const ZUpdateTodoSchema = z.object({
   title: z.string().min(3).optional(),
   completed: z.boolean().optional(),
 });
 
-const GetTodosSchema = z.object({
+const ZGetTodosSchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(10),
   completed: z.coerce.boolean().optional(),
   search: z.string().optional(),
 });
 
-const getCollection = <T extends Document>(name: string) =>
-  db.collection<T>(name);
+const todoSchema = new Schema(
+  {
+    title: String,
+    completed: {
+      type: Boolean,
+      default: false,
+    },
+  },
+  {
+    timestamps: true,
+  },
+);
 
-const app = express();
-const port = 3000;
+const Todo = model("Todo", todoSchema);
 
-app.use(express.json());
-
-app.use(morgan("dev"));
-
-// a bit of protection against invalid JSON
-function errorHandler(
+const errorHandler = (
   err: unknown,
   _req: Request,
   res: Response,
   _next: NextFunction,
-) {
-  if (err instanceof SyntaxError && "body" in err) {
-    res.status(400).json({ error: "Invalid JSON" });
-    return;
+) => {
+  console.error("Something went wrong: ", err);
+
+  if (err instanceof ZodError) {
+    return res.status(400).json({ error: err.issues });
   }
-  res.status(500).json({ error: "Internal server error" });
-}
 
-await connectDB();
+  if (err instanceof mongoose.Error.CastError) {
+    return res.status(400).json({ error: "Invalid ID" });
+  }
 
-const todos = getCollection<Todo>("todos");
+  if (err instanceof mongoose.Error.ValidationError) {
+    return res.status(400).json({ error: err.message });
+  }
 
-// hello world
-app.get("/", (req, res) => {
-  res.send("Hello Eli!");
+  return res.status(500).json({
+    error:
+      "Something went wrong, please double check your request or try again later.",
+  });
+};
+
+// create
+app.post("/todo", async (req, res) => {
+  const { title } = ZCreateTodoSchema.parse(req.body);
+
+  const todo = await Todo.create({
+    title,
+  });
+
+  return res.status(201).json(todo);
 });
 
-// get one
+// get by id
 app.get("/todo/:id", async (req, res) => {
-  const parsed = TodoIdSchema.safeParse(req.params.id);
+  const id = ZMongoIdSchema.parse(req.params.id);
 
-  if (!parsed.success) {
-    return res.status(400).json({ error: parsed.error.issues });
-  }
+  const todo = await Todo.findById(id);
 
-  try {
-    const result = await todos.findOne({ _id: parsed.data });
-    if (result === null) {
-      return res.sendStatus(404);
-    }
-    return res.status(200).json(result);
-  } catch (error) {
-    console.error(error);
-    return res.status(500).json({ error: "Server error." });
+  if (todo === null) {
+    return res.sendStatus(404);
   }
+  return res.status(200).json(todo);
 });
 
 // get many
 app.get("/todo", async (req, res) => {
-  const parsed = GetTodosSchema.safeParse(req.query);
+  const { limit, page, search, completed } = ZGetTodosSchema.parse(req.query);
 
-  if (!parsed.success) {
-    return res.status(400).json({ error: "Invalid query parameters." });
+  const filter: Record<string, unknown> = {};
+
+  if (completed !== undefined) {
+    filter.completed = completed;
   }
 
-  const filter: Filter<Todo> = {} as Filter<Todo>;
-
-  if (parsed.data.completed !== undefined) {
-    filter.completed = parsed.data.completed;
+  if (search !== undefined) {
+    filter.title = { $regex: search, $options: "i" };
   }
 
-  if (parsed.data.search) {
-    filter.title = { $regex: parsed.data.search, $options: "i" };
-  }
+  const todos = await Todo.find(filter)
+    .limit(limit)
+    .skip((page - 1) * limit);
 
-  try {
-    const response = await todos
-      .find(filter)
-      .skip((parsed.data.page - 1) * parsed.data.limit)
-      .limit(parsed.data.limit)
-      .toArray();
-
-    return res.status(200).json({ data: response });
-  } catch (error) {
-    console.error(error);
-    return res.status(500).json({ error: "Problem while fetching todos." });
-  }
+  return res.status(200).json({ data: todos });
 });
 
-// insert one
-app.post("/todo", async (req, res) => {
-  try {
-    const parsed = CreateTodoSchema.safeParse(req.body);
-
-    if (!parsed.success) {
-      res.status(400).json({ error: parsed.error.issues });
-      return;
-    }
-
-    const newTodo = {
-      title: parsed.data.title,
-      completed: false,
-    };
-
-    const result = await todos.insertOne(newTodo);
-
-    res.status(201).json({ ...newTodo, _id: result.insertedId });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: "Failed to create todo" });
-  }
-});
-
-// update one
+// update
 app.patch("/todo/:id", async (req, res) => {
-  const parsedParams = TodoIdSchema.safeParse(req.params.id);
-  const parsedBody = UpdateTodoSchema.safeParse(req.body);
+  const id = ZMongoIdSchema.parse(req.params.id);
+  const body = ZUpdateTodoSchema.parse(req.body);
 
-  if (!parsedParams.success) {
-    return res.status(400).json({ error: parsedParams.error.issues });
+  const todo = await Todo.findByIdAndUpdate(id, body, { new: true });
+
+  if (todo === null) {
+    return res.sendStatus(404);
   }
 
-  if (!parsedBody.success) {
-    return res.status(400).json({ error: parsedBody.error.issues });
-  }
-
-  const newTodo = parsedBody.data;
-
-  try {
-    const response = await todos.findOneAndUpdate(
-      { _id: parsedParams.data },
-      { $set: newTodo as Partial<Todo> },
-      { returnDocument: "after" },
-    );
-
-    if (response === null) {
-      return res.sendStatus(404);
-    }
-
-    res.status(200).json(response);
-  } catch (error) {
-    console.error("Problem while updating todo: ", error);
-    return res.status(500).json({ error: "Problem while updating todo" });
-  }
+  return res.status(200).json(todo);
 });
 
-// delete one
+// delete
 app.delete("/todo/:id", async (req, res) => {
-  const parsed = TodoIdSchema.safeParse(req.params.id);
+  const id = ZMongoIdSchema.parse(req.params.id);
 
-  if (!parsed.success) {
-    return res.status(400).json({ error: parsed.error.issues });
+  const todo = await Todo.findByIdAndDelete(id);
+
+  if (todo === null) {
+    return res.sendStatus(404);
   }
 
-  try {
-    const result = await todos.deleteOne({ _id: parsed.data });
-
-    if (result.deletedCount === 0) {
-      return res.sendStatus(404);
-    }
-
-    return res.sendStatus(204);
-  } catch (error) {
-    console.error(error);
-    return res.status(500).json({ error: "Failed to delete todo." });
-  }
+  return res.status(200).json(todo);
 });
 
+// Let' allow errors to bubble up, handle them in a single place.
 app.use(errorHandler);
 
 app.listen(port, () => {
-  console.log(`Example app listening on port ${port}`);
+  console.log(`Eli's todo app listening on port ${port}`);
 });
