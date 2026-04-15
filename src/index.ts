@@ -6,12 +6,20 @@ import { z } from "zod";
 import morgan from "morgan";
 import { ObjectId } from "mongodb";
 
-const TodoIdSchema = z.string().refine((val) => ObjectId.isValid(val), {
-  error: "You passed an Invalid ID.",
-});
+const TodoIdSchema = z
+  .string()
+  .refine((val) => ObjectId.isValid(val), {
+    error: "You passed an Invalid ID.",
+  })
+  .transform((val) => new ObjectId(val));
 
 const CreateTodoSchema = z.object({
   title: z.string().min(3),
+});
+
+const UpdateTodoSchema = z.object({
+  title: z.string().min(3).optional(),
+  completed: z.boolean().optional(),
 });
 
 const GetTodosSchema = z.object({
@@ -55,10 +63,8 @@ app.get("/todo/:id", async (req, res) => {
     return res.status(400).json({ errors: parsed.error.issues });
   }
 
-  const _id = new ObjectId(req.params.id);
-
   try {
-    const result = await db.collection("todos").findOne({ _id });
+    const result = await db.collection("todos").findOne({ _id: parsed.data });
     if (result === null) {
       return res.sendStatus(404);
     }
@@ -117,13 +123,38 @@ app.post("/todo", async (req, res) => {
 });
 
 // update one
-app.patch("/todo/:id", (req, res) => {
-  const updatedTodo = {
-    id: req.params.id,
-    title: req.body.title,
-  };
+app.patch("/todo/:id", async (req, res) => {
+  const parsedParams = TodoIdSchema.safeParse(req.params.id);
+  const parsedBody = UpdateTodoSchema.safeParse(req.body);
 
-  res.status(200).json(updatedTodo);
+  if (!parsedParams.success) {
+    return res.status(400).json({ error: parsedParams.error.issues });
+  }
+
+  if (!parsedBody.success) {
+    return res.status(400).json({ error: parsedBody.error.issues });
+  }
+
+  const newTodo = parsedBody.data;
+
+  try {
+    const response = await db
+      .collection("todos")
+      .findOneAndUpdate(
+        { _id: parsedParams.data },
+        { $set: newTodo },
+        { returnDocument: "after" },
+      );
+
+    if (response === null) {
+      return res.sendStatus(404);
+    }
+
+    res.status(200).json(response);
+  } catch (error) {
+    console.error("Problem while updating todo: ", error);
+    return res.status(500).json({ error: "Problem while updating todo" });
+  }
 });
 
 // delete one
@@ -134,10 +165,8 @@ app.delete("/todo/:id", async (req, res) => {
     return res.status(400).json({ errors: parsed.error.issues });
   }
 
-  const _id = new ObjectId(parsed.data);
-
   try {
-    const result = await db.collection("todos").deleteOne({ _id });
+    const result = await db.collection("todos").deleteOne({ _id: parsed.data });
 
     if (result.deletedCount === 0) {
       return res.sendStatus(404);
