@@ -14,6 +14,11 @@ const CreateTodoSchema = z.object({
   title: z.string().min(3),
 });
 
+const GetTodosSchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(10),
+});
+
 const app = express();
 const port = 3000;
 
@@ -65,16 +70,26 @@ app.get("/todo/:id", async (req, res) => {
 });
 
 // get many
-app.get("/todo", (req, res) => {
-  // play with search params
-  console.log("Query: ", req.query.name);
-  console.log("Query: ", req.query.age);
+app.get("/todo", async (req, res) => {
+  const parsed = GetTodosSchema.safeParse(req.query);
 
-  const todos = [1, 2, 3, 4, 5, 6, 7, 8].map((item) => ({
-    id: item,
-    title: `Item ${item}`,
-  }));
-  res.status(200).json({ data: todos });
+  if (!parsed.success) {
+    return res.status(400).json({ error: "Invalid query parameters." });
+  }
+
+  try {
+    const response = await db
+      .collection("todos")
+      .find()
+      .skip((parsed.data.page - 1) * parsed.data.limit)
+      .limit(parsed.data.limit)
+      .toArray();
+
+    return res.status(200).json({ data: response });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ error: "Problem while fetching todos." });
+  }
 });
 
 // insert one
