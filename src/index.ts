@@ -32,10 +32,14 @@ const ZCreateTodoSchema = z.object({
   title: z.string().min(3),
 });
 
-const ZUpdateTodoSchema = z.object({
-  title: z.string().min(3).optional(),
-  completed: z.boolean().optional(),
-});
+const ZUpdateTodoSchema = z
+  .object({
+    title: z.string().min(3).optional(),
+    completed: z.boolean().optional(),
+  })
+  .refine((data) => Object.keys(data).length > 0, {
+    error: "At least one field must be provided.",
+  });
 
 const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
