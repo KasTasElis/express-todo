@@ -1,5 +1,5 @@
 import "dotenv/config";
-import mongoose from "mongoose";
+import mongoose, { Types } from "mongoose";
 import express, {
   type NextFunction,
   type Response,
@@ -7,18 +7,24 @@ import express, {
 } from "express";
 import morgan from "morgan";
 import z, { ZodError } from "zod";
-import { ObjectId } from "mongodb";
+
+const EnvSchema = z.object({
+  MONGODB_URI: z.string().min(1),
+  PORT: z.coerce.number().default(3000),
+});
+
+const env = EnvSchema.parse(process.env);
 
 const app = express();
-const port = 3000;
+const port = env.PORT;
 app.use(express.json());
 app.use(morgan("dev"));
 
 const { Schema, model } = mongoose;
 
-await mongoose.connect(process.env.MONGODB_URI!, { dbName: "todo" });
+await mongoose.connect(env.MONGODB_URI, { dbName: "todo" });
 
-const ZMongoIdSchema = z.string().refine((val) => ObjectId.isValid(val), {
+const ZMongoIdSchema = z.string().refine((val) => Types.ObjectId.isValid(val), {
   error: "Invalid Object ID.",
 });
 
@@ -31,11 +37,13 @@ const ZUpdateTodoSchema = z.object({
   completed: z.boolean().optional(),
 });
 
+const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 const ZGetTodosSchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(10),
   completed: z.coerce.boolean().optional(),
-  search: z.string().optional(),
+  search: z.string().transform(escapeRegex).optional(),
 });
 
 const todoSchema = new Schema(
@@ -116,11 +124,22 @@ app.get("/todo", async (req, res) => {
     filter.title = { $regex: search, $options: "i" };
   }
 
-  const todos = await Todo.find(filter)
-    .limit(limit)
-    .skip((page - 1) * limit);
+  const [todos, total] = await Promise.all([
+    Todo.find(filter)
+      .limit(limit)
+      .skip((page - 1) * limit),
+    Todo.countDocuments(filter),
+  ]);
 
-  return res.status(200).json({ data: todos });
+  const responseJson = {
+    data: todos,
+    total,
+    limit,
+    page,
+    totalPages: Math.ceil(total / limit),
+  };
+
+  return res.status(200).json(responseJson);
 });
 
 // update
