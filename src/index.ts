@@ -102,7 +102,7 @@ app.post("/todo", async (req, res) => {
   return res.status(201).json(todo);
 });
 
-// get by id
+// get by ID
 app.get("/todo/:id", async (req, res) => {
   const id = ZMongoIdSchema.parse(req.params.id);
 
